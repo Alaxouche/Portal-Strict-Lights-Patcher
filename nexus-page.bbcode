@@ -1,0 +1,196 @@
+[center][url=https://github.com/Alaxouche/Portal-Strict-Lights-Patcher][img]https://img.shields.io/github/last-commit/Alaxouche/Portal-Strict-Lights-Patcher[/img][/url] [url=https://github.com/Alaxouche/Portal-Strict-Lights-Patcher/issues][img]https://img.shields.io/github/issues/Alaxouche/Portal-Strict-Lights-Patcher[/img][/url] [url=https://github.com/Alaxouche/Portal-Strict-Lights-Patcher][img]https://img.shields.io/github/license/Alaxouche/Portal-Strict-Lights-Patcher?v=1[/img][/url] [url=https://github.com/Alaxouche/Portal-Strict-Lights-Patcher/releases][img]https://img.shields.io/github/v/release/Alaxouche/Portal-Strict-Lights-Patcher[/img][/url][/center]
+
+[color=#f6b26b][size=5]Description[/size][/color]
+
+[quote]Portal Lights Runtime Patcher is a small SKSE plugin that sets the Portal-strict flag on placed lights while the game runs. Portal-strict tells the engine to keep a light inside the room it belongs to instead of letting it bleed through walls and doorways. Most interior lights should have it. Plenty of them don't, in vanilla and in mods.
+
+You get the same result as an xEdit override patch, without the ESP, without a load order slot, and without conflicts to resolve. It reads whatever your load order actually ends up with on your machine.[/quote]
+
+Requirements
+[list]
+[*][url=https://skse.silverlock.org/]SKSE64[/url][/*]
+[*][url=https://www.nexusmods.com/skyrimspecialedition/mods/32444]Address Library[/url][/*]
+[*][url=https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170]Visual C++ Redistributable[/url][/*]
+[/list]
+
+[color=#f6b26b][size=5]What It Does[/size][/color]
+
+Portal-strict is right for a candle on a table. It is wrong for a light that travels around with whoever is holding it. A torch that stops lighting the room the moment you walk through a doorway is worse than light bleed.
+
+So the plugin only touches placed lights:
+
+[list]
+[*][b]Placed light references[/b] (candles, sconces, braziers, chandeliers) get the flag[/*]
+[*][b]Equipped torches[/b] are left alone[/*]
+[*][b]Spell and magic lights[/b] are left alone[/*]
+[*][b]Hazard lights[/b] (fire, frost, shock effects) are left alone[/*]
+[*][b]Menu and inventory lights[/b] are left alone[/*]
+[/list]
+
+This is not a name filter or a guess. Those two groups are built by different parts of the engine, and the plugin only sits on the one that builds placed lights.
+
+[center][b][size=3]Short version: your interior lights stop leaking through walls, and your torch keeps working.[/size][/b][/center]
+
+[color=#f6b26b][size=5]How It Works[/size][/color]
+
+The plugin hooks two entries of the [i]TESObjectLIGH[/i] vtable, [i]Clone3D[/i] and
+[i]LoadGraphics[/i]. Those two are only called when the engine builds the 3D of a
+reference whose base object is the light itself. Torches, spell lights and hazards
+do not go through them, they get built somewhere else by the magic and equip
+systems. That is what separates the two groups, not a name check.
+
+When the hook runs it adds the portal strict flag to the record, lets the engine
+build the light, then takes the flag back off right after. The engine reads it
+during the call and keeps the result on the light in the scene. So the light is
+portal strict ingame, but the record stays exactly how your load order made it.
+Nothing is left modified.
+
+This matters because the same light record can be a candle in one cell and a
+carried or cast light somewhere else. Writing the flag permanently would hit those
+too, and that is exactly what we do not want.
+
+Lights that already have the flag are counted and skipped.
+
+Options to exclude magic lights and spotlights are in the ini, following Bottle's
+experience with them. Both are off by default so nothing is excluded unless you ask
+for it. Note that real spell lights never reach the hook anyway, so the magic option
+only does something for a magic record that was placed in a cell as a normal
+reference.
+
+[b]Nothing is written into the game exe.[/b] No trampoline, no patched bytes, no
+hardcoded address. So there is no "wrong offset after the next update" problem.
+
+I tried the call site approach first. On AE 1.6.1170 the offsets I got pointed at
+the wrong code, and scanning the exe found 14 callers of the light generator with
+none of them where they were supposed to be. The vtable way avoids all of that.
+
+[color=#f6b26b][size=5]Configuration[/size][/color]
+
+Everything lives in [i]Data/SKSE/Plugins/PortalLightsRuntimePatcher.ini[/i]. The file is rewritten on every start, so missing keys come back with their comments.
+
+Defaults are fine for almost everyone. You should not need to touch this.
+
+[code][Filters]
+ExcludeMagicLights = false      ; Also drop lights with "magic" in their EditorID.
+                                ; Off because spell lights are already excluded by design.
+                                ; Only matters for a magic record placed in a cell as
+                                ; a normal reference. Needs po3_Tweaks to work at all.
+
+ExcludeSpotLights = false       ; Leave spotlights alone. Portal-strict on a spot can
+                                ; cut off a cone that should still be visible.
+
+[Log]
+EnableLogging = true
+LogLevel = 3                    ; 1=error 2=warn 3=info 4=debug 5=trace
+
+[Debug]
+AuditHotkey = 0                 ; Scan code for the in-game audit. 87 is F11. Off by default.
+DisableHooks = false            ; Baseline switch, see below.
+DiagnoseLights = 0              ; Dump this many lights per audit in full detail.[/code]
+
+[color=#f6b26b][size=5]Checking It Actually Works[/size][/color]
+
+This is the part I care about most, because "the log says it wrote the flag" proves nothing. A log that reads back its own write can only ever agree with itself.
+
+Set [i]AuditHotkey[/i] to 87 (F11) and press it in a lit interior. The plugin walks the lights that are live in the renderer right now and reads the flag the portal culling actually uses, straight off the engine data. That read sits downstream of everything the plugin does, so it is able to disagree with it.
+
+One run on its own still proves nothing though. Do it twice:
+
+[list=1]
+[*]Set [i]DisableHooks = true[/i], load a save in a lit interior, press the key. That is your baseline.[/*]
+[*]Set it back to [i]false[/i], load the same save at the same spot, press again.[/*]
+[/list]
+
+Same scene, same lights, one thing changed. Here is a real pair of runs from my own setup on AE 1.6.1170, with 195 lights in the scene both times:
+
+[code]                      placed lights strict | not strict | everything else strict
+DisableHooks = true            17                    7                  171
+DisableHooks = false           24                    0                  171[/code]
+
+and the plugin reported that it flagged 7 lights on the second run. Those are the same seven. The target moved, the control group did not.
+
+If a run comes back saying every single light in the scene is portal-strict, that is not a pass, that is a broken measurement. The audit says so instead of reporting success.
+
+[spoiler]
+[18:26:43.601] [I] PortalLightsRuntimePatcher v1-0-0-0
+[18:26:43.601] [W] Debug/DisableHooks is ON: nothing is hooked. An audit now shows what the load order already had, which is the baseline the real run has to differ from.
+
+--- Scene audit (interior) ---
+Hooks installed            : NO
+Ref lights built so far    : 0 (flagged 0, already strict 0)
+Lights live in the renderer: 195
+  placed light bulbs       : 24
+    portal-strict          : 17
+    NOT portal-strict      : 7
+
+--- Scene audit (interior) ---
+Hooks installed            : yes
+Ref lights built so far    : 48 (flagged 7, already strict 41)
+  skipped by filters       : 0 spot, 0 magic
+Lights live in the renderer: 195
+  placed light bulbs       : 24
+    portal-strict          : 24
+    NOT portal-strict      : 0
+[AUDIT] PASS: all 24 placed light bulb(s) reached the renderer with portalStrict set.
+[/spoiler]
+
+[color=#f6b26b][size=5]Compatibility[/size][/color]
+
+Built against CommonLibSSE-NG for [u]Skyrim SE and AE[/u]. Tested on 1.6.1170.
+
+[list]
+[*]Safe to add or remove mid-save. Nothing is stored in your save.[/*]
+[*]No conflicts with lighting mods. It reads whatever they set and only adds the flag where it is missing.[/*]
+[*]No known conflicts with other SKSE plugins.[/*]
+[*][b]VR is untested.[/b] The vtable layout is different there. Do not assume it works.[/*]
+[/list]
+
+[color=#f6b26b][size=5]What To Expect[/size][/color]
+
+Light stops going through walls in interiors where it should not. That is it. Depending on your load order you might not notice much, or you might notice a lot. Mine had 7 lights out of 24 fixed in a single room.
+
+Portal culling only runs in interiors, so exteriors are unaffected either way.
+
+What this is not:
+[list]
+[*]Not an FPS mod. Portal-strict can help the renderer skip work, but do not install this expecting frames.[/*]
+[*]Not a fix for badly built cells. If a room has no room bounds or portals, there is nothing for the flag to do.[/*]
+[/list]
+
+If you already run an xEdit patch that sets Portal-strict everywhere, this does the same job with fewer downsides, and it leaves your torches alone.
+
+[color=#f6b26b][size=5]FAQ[/size][/color]
+
+[quote]Q: Safe to install mid-save?
+A: Yes, and safe to remove too. Nothing is baked into the save.
+
+Q: Do I need powerofthree's Tweaks?
+A: No. It is only used by ExcludeMagicLights, which is off by default.
+
+Q: Will this break my torch?
+A: No. That is the whole reason it works the way it does.
+
+Q: Does it edit my plugins or my records?
+A: No. The flag is set for the length of one engine call and removed right after.
+
+Q: Should I leave the audit hotkey bound?
+A: No reason to. It is a diagnostic. Leave it at 0 unless you are testing something.[/quote]
+
+[color=#f6b26b][size=5]Credits & Source Code[/size][/color]
+
+[list]
+[*]SKSE Team for SKSE[/*]
+[*]Ryan McKenzie for CommonLibSSE[/*]
+[*]CharmedBaryon for CommonLibSSE-NG[/*]
+[*][url=https://www.nexusmods.com/skyrimspecialedition/users/2148728]powerofthree[/url] for po3_Tweaks and ClibUtil[/*]
+[*][b]Truman[/b] for the idea the whole plugin is built on: only reference lights should be portal-strict, and patching every light record the way an xEdit override does hits spell and equipped lights it has no business touching. He also pointed me at the light generator function in the first place.[/*]
+[*][b]Bottle[/b] for the feedback on magic lights and spotlights, which is why both exclusion options exist[/*]
+[*][url=https://www.nexusmods.com/profile/Quantumyilmaz?gameId=1704]Quantumyilmaz[/url] and [url=https://github.com/RavenKZP]RavenKZP[/url] for hooking advice[/*]
+[*]Modding Guild for the help and the testing[/*]
+[/list]
+
+Source code is [url=https://github.com/Alaxouche/Portal-Strict-Lights-Patcher]here[/url].
+
+[center]If you want you can support me here:
+
+[url=https://ko-fi.com/alaxouche][img]https://i.imgur.com/7Cm07AZ.png[/img][/url] [url=https://www.patreon.com/alaxouche][img]https://i.redd.it/5j7n6fznfxga1.png[/img][/url][/center]

@@ -6,7 +6,9 @@
 #include <SKSE/SKSE.h>
 
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <format>
 #include <fstream>
@@ -25,6 +27,8 @@
 
 // ClibUtil headers resolve through ClibUtil/include, added in xmake.lua.
 // simpleINI.hpp bundles SimpleIni, so there is no separate checkout to manage.
+// editorID.hpp needs powerofthree Tweaks at runtime; ExcludeMagicLights is the
+// only thing that reads it, and it says so in the log when it comes back empty.
 #include <CLIBUtil/editorID.hpp>
 #include <CLIBUtil/simpleINI.hpp>
 #include <CLIBUtil/string.hpp>
