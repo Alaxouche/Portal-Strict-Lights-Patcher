@@ -2,7 +2,7 @@ set_xmakever('3.0.1')
 includes('lib/commonlibsse-ng')
 
 set_project('PortalLightsRuntimePatcher')
-set_version('1.0.0')
+set_version('2.0.0')
 set_license('GPL-3.0')
 
 set_languages('c++23')

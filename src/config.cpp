@@ -6,8 +6,12 @@
 
 namespace PortalLightsRuntimePatcher::Config
 {
-	bool EXCLUDE_MAGIC_LIGHTS = false;
-	bool EXCLUDE_SPOT_LIGHTS  = false;
+	bool EXCLUDE_MAGIC_LIGHTS = true;
+	bool EXCLUDE_SPOT_LIGHTS  = true;
+	bool EXCLUDE_SHADOW_LIGHTS = true;
+	bool EXCLUDE_CARRIED_LIGHTS = true;
+	bool PATCH_EXTERIORS       = true;
+	bool PATCH_LIGHT_PLACER    = true;
 	bool ENABLE_LOGGING       = true;
 	int  LOG_LEVEL            = 3;
 	int  AUDIT_HOTKEY         = 0;
@@ -46,20 +50,56 @@ namespace PortalLightsRuntimePatcher
 		// SimpleIni wants one comment block per key, every line prefixed with ";".
 
 		constexpr auto kCommentMagic =
-			";OFF by default: the entry points this plugin hooks are only reached for placed\n"
-			";references, so spell lights, equipped torches and hazards are already excluded\n"
-			";without any name matching.\n"
-			";Turn on to additionally drop any light whose EditorID contains the word magic.\n"
-			";That only changes anything for a magic record placed in a cell as an ordinary\n"
-			";reference, which is rare.\n"
+			";ON by default: any light whose EditorID contains the word magic is left alone.\n"
+			";Real spell lights never reach this plugin anyway, so this only covers a magic\n"
+			";record that was placed in a cell as an ordinary reference.\n"
+			";Turn off to treat those like any other placed light.\n"
 			";REQUIRES powerofthree Tweaks: without po3_Tweaks.dll no light has a readable\n"
-			";EditorID at runtime and this filter cannot test anything. The log says so once,\n"
-			";with a count, rather than failing quietly.";
+			";EditorID at runtime and this filter cannot test anything, so nothing gets\n"
+			";excluded. The audit says so with a count rather than failing quietly.";
 
 		constexpr auto kCommentSpot =
-			";OFF by default: spotlights get Portal-strict like every other reference light.\n"
-			";Turn on to leave them alone (Spot Light / Spot Shadow flags).\n"
-			";Portal-strict on a spot can drop culled-but-visible cones.";
+			";ON by default: spotlights are left alone (Spot Light / Spot Shadow flags).\n"
+			";Portal-strict on a spot can drop a cone that should still be visible.\n"
+			";Turn off to give them the flag like every other placed light.";
+
+		constexpr auto kCommentShadow =
+			";ON by default: shadow-casting lights are left alone (Hemi/Omni/Spot Shadow).\n"
+			";Lighting overhauls such as ELFX Shadows and Lux use long-range shadow lights\n"
+			";placed OUTSIDE the room bounds on purpose, so they can throw window shadows\n"
+			";inward. Confining one to a room stops those shadows working.\n"
+			";Reported by nicola89b, co-author of ELFX Shadows. Turn off only if you know\n"
+			";your lighting mod does not rely on them.";
+
+		constexpr auto kCommentCarried =
+			";ON by default: lights the player or an NPC can pick up are left alone.\n"
+			";A carriable light travels through doorways in someone hand, torches above\n"
+			";all. The flag lives on the record, and a torch lying on a dungeon floor uses\n"
+			";the same DefaultTorch01 record as every carried torch: flag it there and every\n"
+			";torch in the game stops lighting the next room. Turn off only if you know\n"
+			";what you are doing.";
+
+		constexpr auto kCommentExterior =
+			";ON by default: exterior cells are patched like interiors.\n"
+			";Room bounds and portals only exist indoors, so the flag has nothing to cull\n"
+			";against outside one. It is set anyway for two reasons: the xEdit script this\n"
+			";plugin replaces has always flagged every record regardless of where it is used,\n"
+			";and the flag lives on the record, so a form first seen in an interior carries it\n"
+			";outdoors whatever this setting says.\n"
+			";Turn off to skip lights whose reference sits in an exterior cell. That narrows\n"
+			";exposure but cannot unflag a record already caught indoors.";
+
+		constexpr auto kCommentLightPlacer =
+			";ON by default: records named by Light Placer configs get the flag too.\n"
+			";Light Placer builds its own lights from the JSON files under Data/LightPlacer,\n"
+			";each entry naming a LIGH record by EditorID, and makes a light portal-strict\n"
+			";when its entry says PortalStrict OR the record carries the flag. Those lights\n"
+			";never pass through the engine entry points this plugin hooks, so this pass\n"
+			";reads the configs at load and flags the records they name, before any light\n"
+			";is built. Entries already marked PortalStrict are left to Light Placer.\n"
+			";The same filters apply: carried, shadow (form flags or Shadow in the entry),\n"
+			";spot and magic. Note that many configs reuse MagicLightWhite01 and similar\n"
+			";records as generic bulbs: with ExcludeMagicLights on those are skipped here.";
 
 		constexpr auto kCommentLogging =
 			";Write PortalLightsRuntimePatcher.log to\n"
@@ -107,6 +147,10 @@ namespace PortalLightsRuntimePatcher
 
 		clib_util::ini::get_value(ini, cfg.excludeMagicLights, "Filters", "ExcludeMagicLights", kCommentMagic);
 		clib_util::ini::get_value(ini, cfg.excludeSpotLights, "Filters", "ExcludeSpotLights", kCommentSpot);
+		clib_util::ini::get_value(ini, cfg.excludeShadowLights, "Filters", "ExcludeShadowLights", kCommentShadow);
+		clib_util::ini::get_value(ini, cfg.excludeCarriedLights, "Filters", "ExcludeCarriedLights", kCommentCarried);
+		clib_util::ini::get_value(ini, cfg.patchExteriors, "Filters", "PatchExteriors", kCommentExterior);
+		clib_util::ini::get_value(ini, cfg.patchLightPlacer, "LightPlacer", "PatchLightPlacer", kCommentLightPlacer);
 		clib_util::ini::get_value(ini, cfg.enableLogging, "Log", "EnableLogging", kCommentLogging);
 		clib_util::ini::get_value(ini, cfg.logLevel, "Log", "LogLevel", kCommentLevel);
 		clib_util::ini::get_value(ini, cfg.auditHotkey, "Debug", "AuditHotkey", kCommentHotkey);
@@ -142,6 +186,10 @@ namespace PortalLightsRuntimePatcher
 	{
 		Config::EXCLUDE_MAGIC_LIGHTS = a_cfg.excludeMagicLights;
 		Config::EXCLUDE_SPOT_LIGHTS  = a_cfg.excludeSpotLights;
+		Config::EXCLUDE_SHADOW_LIGHTS = a_cfg.excludeShadowLights;
+		Config::EXCLUDE_CARRIED_LIGHTS = a_cfg.excludeCarriedLights;
+		Config::PATCH_EXTERIORS       = a_cfg.patchExteriors;
+		Config::PATCH_LIGHT_PLACER    = a_cfg.patchLightPlacer;
 		Config::ENABLE_LOGGING       = a_cfg.enableLogging;
 		Config::LOG_LEVEL            = a_cfg.logLevel;
 		Config::AUDIT_HOTKEY         = a_cfg.auditHotkey;

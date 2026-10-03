@@ -5,6 +5,7 @@
 
 #include "config.h"
 #include "hooks.h"
+#include "lightplacer.h"
 #include "logger.h"
 #include "verify.h"
 
@@ -26,6 +27,12 @@ namespace
 			break;
 
 		case SKSE::MessagingInterface::kDataLoaded:
+			// Forms exist from here on and no light has been built yet, so this is
+			// when the records Light Placer will use can still be flagged in time.
+			if (Config::PATCH_LIGHT_PLACER && !Config::DISABLE_HOOKS) {
+				PatchLightPlacerConfigs();
+			}
+
 			// A plugin that quietly does nothing is worse than one that fails loudly,
 			// so a refused install is put in front of the player once, on screen.
 			if (!HooksInstalled() && !Config::DISABLE_HOOKS) {
@@ -41,7 +48,9 @@ namespace
 	}
 }
 
-extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_skse)
+// SKSE_PLUGIN_LOAD already carries extern "C" and __declspec(dllexport); the
+// old SKSEAPI spelling was dropped by CommonLibSSE-NG.
+SKSE_PLUGIN_LOAD(const SKSE::LoadInterface* a_skse)
 {
 	REL::Module::reset();
 
@@ -61,10 +70,14 @@ extern "C" DLLEXPORT bool SKSEAPI SKSEPlugin_Load(const SKSE::LoadInterface* a_s
 	logger::info("[CONFIG] {} ({})",
 	             cfg.iniFound ? "INI loaded" : "INI not found, defaults written",
 	             cfg.iniPath.string());
-	logger::info("[CONFIG] ExcludeMagicLights={}, ExcludeSpotLights={}, LogLevel={}, "
-	             "AuditHotkey=0x{:02X}",
+	logger::info("[CONFIG] ExcludeMagic={}, ExcludeSpot={}, ExcludeShadow={}, ExcludeCarried={}, "
+	             "PatchExteriors={}, PatchLightPlacer={}, LogLevel={}, AuditHotkey=0x{:02X}",
 	             cfg.excludeMagicLights,
 	             cfg.excludeSpotLights,
+	             cfg.excludeShadowLights,
+	             cfg.excludeCarriedLights,
+	             cfg.patchExteriors,
+	             cfg.patchLightPlacer,
 	             cfg.logLevel,
 	             cfg.auditHotkey);
 

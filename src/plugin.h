@@ -8,5 +8,5 @@ namespace Plugin
 {
     inline constexpr std::string_view NAME = "PortalLightsRuntimePatcher";
     inline constexpr std::string_view AUTHOR = "Alaxouche";
-    inline constexpr REL::Version VERSION{ 1, 0, 0, 0 };
+    inline constexpr REL::Version VERSION{ 2, 0, 0, 0 };
 }

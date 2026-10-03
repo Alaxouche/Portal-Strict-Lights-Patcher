@@ -4,6 +4,7 @@
 
 #include "config.h"
 #include "hooks.h"
+#include "lightplacer.h"
 
 namespace PortalLightsRuntimePatcher
 {
@@ -197,8 +198,18 @@ namespace PortalLightsRuntimePatcher
 		logger::info("Hooks installed            : {}", HooksInstalled() ? "yes" : "NO");
 		logger::info("Ref lights built so far    : {} (flagged {}, already strict {})",
 		             hooks.refLights, hooks.flagged, hooks.alreadyStrict);
-		logger::info("  skipped by filters       : {} spot, {} magic",
-		             hooks.spotSkipped, hooks.magicSkipped);
+		logger::info("  skipped by filters       : {} spot, {} magic, {} shadow, {} carried, {} exterior",
+		             hooks.spotSkipped, hooks.magicSkipped, hooks.shadowSkipped,
+		             hooks.carriedSkipped, hooks.exteriorSkipped);
+
+		const auto& lp = GetLightPlacerStats();
+		if (lp.ran) {
+			logger::info("Light Placer at load       : {} file(s), {} entrie(s), {} already strict in JSON, "
+			             "{} record(s) flagged, {} already strict, {} unresolved",
+			             lp.files, lp.entries, lp.strictInJson, lp.flagged, lp.alreadyStrict, lp.unresolved);
+		} else {
+			logger::info("Light Placer at load       : not run (no Data/LightPlacer, or disabled)");
+		}
 		logger::info("Lights live in the renderer: {}", audit.lights);
 		logger::info("  placed light bulbs       : {}", audit.refLights);
 		logger::info("    portal-strict          : {}", audit.refStrict);

@@ -8,8 +8,12 @@ namespace PortalLightsRuntimePatcher
 {
 	struct RuntimeConfig
 	{
-		bool excludeMagicLights = false;
-		bool excludeSpotLights  = false;
+		bool excludeMagicLights = true;
+		bool excludeSpotLights  = true;
+		bool excludeShadowLights = true;
+		bool excludeCarriedLights = true;
+		bool patchExteriors      = true;
+		bool patchLightPlacer    = true;
 
 		bool enableLogging = true;
 		int  logLevel      = 3;
@@ -43,6 +47,10 @@ namespace PortalLightsRuntimePatcher::Config
 {
 	extern bool EXCLUDE_MAGIC_LIGHTS;
 	extern bool EXCLUDE_SPOT_LIGHTS;
+	extern bool EXCLUDE_SHADOW_LIGHTS;
+	extern bool EXCLUDE_CARRIED_LIGHTS;
+	extern bool PATCH_EXTERIORS;
+	extern bool PATCH_LIGHT_PLACER;
 	extern bool ENABLE_LOGGING;
 	extern int  LOG_LEVEL;
 	extern int  AUDIT_HOTKEY;

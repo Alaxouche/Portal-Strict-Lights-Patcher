@@ -6,13 +6,12 @@ namespace PortalLightsRuntimePatcher
 {
 	/// What the renderer actually holds, not what the hook believes it wrote.
 	///
-	/// The hook sets Portal-strict on the base form only for the duration of one
-	/// Clone3D or LoadGraphics call. Somewhere under that call the engine reads
-	/// the bit and stores it on the BSLight, which is what the portal graph culls
-	/// with. Since the form is restored as soon as the call returns, the BSLight
-	/// is the only place the result survives -- and it is also the place the
-	/// engine actually reads. Nothing here can agree with the hook by
-	/// construction.
+	/// The hook sets Portal-strict on the base form just before a Clone3D or
+	/// LoadGraphics call. Somewhere under that call the engine reads the bit and
+	/// stores it on the BSLight, which is what the portal graph culls with.
+	/// Reading it back off the BSLight is a read at the consumption site, well
+	/// downstream of the record this plugin wrote, so it can disagree with the
+	/// hook rather than echo it.
 	struct SceneAudit
 	{
 		bool valid    = false;  ///< the ShadowSceneNode was reachable

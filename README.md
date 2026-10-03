@@ -31,10 +31,11 @@ object of a reference.
 | `TESObjectLIGH::Clone3D` | vtable `0x4A` | a light reference entering a cell |
 | `TESObjectLIGH::LoadGraphics` | vtable `0x47` | the 3D of that reference being built |
 
-`Filters/ExcludeMagicLights` can additionally drop anything whose EditorID
-contains *magic* before the flag is set. It is off by default because the entry
-points already keep spell lights out; it only changes anything for a magic
-record placed in a cell as an ordinary reference.
+Both filters ship **on**. `ExcludeSpotLights` leaves spot and spot-shadow lights
+alone, because portal-strict on a cone can cull something that should still be
+visible. `ExcludeMagicLights` drops anything whose EditorID contains *magic*; the
+entry points already keep real spell lights out, so it only covers a magic record
+placed in a cell as an ordinary reference.
 
 ## Nothing is written into the executable
 
@@ -51,20 +52,65 @@ depth nobody had established. Wrapping the outer virtual call sidesteps the
 question entirely: the flag is visible for the whole of the work the engine does
 underneath, at any call depth.
 
-## No record is permanently modified
+## The flag is left in place
 
-The thunk sets `TES_LIGHT_FLAGS::kPortalStrict` on the base form, calls the
-original, and immediately clears it again. The engine reads the bit while that
-call runs, copies it into `LIGHT_CREATE_PARAMS::portalStrict`, and
+The thunk sets `TES_LIGHT_FLAGS::kPortalStrict` on the base form just before the
+original call, because that call is what generates the light and reads the flag
+on the way. The engine copies it into `LIGHT_CREATE_PARAMS::portalStrict` and
 `ShadowSceneNode::AddLight` stores it on the `BSLight`, where the portal graph
-culls with it. The result lives on the scene light; the record goes back to
-exactly what the load order defined.
+culls with it.
 
-This matters because the same `LIGH` form can be a placed candle in one cell and
-an equipped or magic light elsewhere. A permanent write would reach those uses
-too and re-introduce the exact problem the entry-point split exists to avoid.
+The flag is **not** taken back off. An earlier build set it, called the engine,
+then restored the record. The light had been built portal-strict but the record
+no longer said so, and the two disagreed: when the engine tore that light down it
+walked the owning room/portal list to unlink it and dereferenced a list the record
+claimed did not exist. Leaving the flag in place is what the xEdit script this
+plugin replaces has always done, and that script does not crash.
 
+## Lights it refuses to touch
+
+Three filters exist because portal-strict is actively harmful on some lights, not
+merely useless:
+
+- **Shadow lights** (`ExcludeShadowLights`, on). ELFX Shadows and Lux place
+  long-range shadow casters *outside* the room bounds so they can throw window
+  shadows inward. Confining one to a room stops those shadows working.
+- **Exteriors** (`PatchExteriors`, on). Room bounds only exist indoors, so the flag
+  has nothing to cull against outside one. It is set anyway: the xEdit script this
+  replaces flags every record regardless of where it is used, and since the flag
+  lives on the record, a form first seen in an interior carries it outdoors whatever
+  this setting says. Turning it off narrows exposure without undoing that.
+- **Carriable lights** (`ExcludeCarriedLights`, on). A torch lying on a dungeon
+  floor is a placed reference whose record is the same `DefaultTorch01` every
+  carried torch uses. The flag lives on the record, so flagging it there would
+  stop every torch in the game lighting the next room. `kCanCarry` on the record
+  is how the engine says a light travels in someone's hand, and that is the test.
+- **Spot and magic lights** (`ExcludeSpotLights`, `ExcludeMagicLights`, both on).
+  Portal-strict on a cone can cull light you should still see; the magic filter
+  covers a magic record placed in a cell as an ordinary reference.
 Lights whose record already carries Portal-strict are counted and left alone.
+## Light Placer
+
+Light Placer builds its own lights from the JSON configs under `Data/LightPlacer`.
+Each entry names a `LIGH` record by EditorID and, in `LightData::GetPortalStrict()`,
+decides portal-strict as *its own `PortalStrict` flag OR the record's
+`kPortalStrict`*. Those lights never pass through `Clone3D` or `LoadGraphics`, so
+the reference hooks never see them.
+
+The second half of that OR is the way in. On `kDataLoaded`, before any light
+exists, the plugin scans the configs, resolves the EditorIDs the same way Light
+Placer does (`TESForm::LookupByEditorID`, with the same `A|B|C` fallback), runs the
+same filters, and flags the records. Entries that already carry `PortalStrict`
+are left to Light Placer. No JSON library is linked: every field this pass needs
+is a quoted string sitting in a flat object, and a brace scanner finds them.
+
+Two things to know. Light Placer casts shadows from its own `Shadow` flag, not
+from the record, so `ExcludeShadowLights` also reads the entry. And config packs
+reuse a handful of records as generic bulbs, `MagicLightWhite01` and
+`MagicLightWardHand01` above all; with `ExcludeMagicLights` on, those stay
+untouched here, which is the safer default since a record-level flag cannot
+honour per-entry choices on a record used a thousand different ways.
+
 ## Verifying it actually worked
 
 Set `Debug/AuditHotkey` to a scan code — `87` is F11 — and press it in game.
@@ -72,9 +118,9 @@ It ships disabled: the audit is a diagnostic, not something a player needs bound
 
 The audit walks `ShadowSceneNode::activeLights` and `activeShadowLights` and
 reads `BSLight::portalStrict` on each one. That boolean belongs to the engine,
-not to this plugin, and since the base form is restored after every call it is
-the only place the result survives. Nothing here can agree with the hook by
-construction.
+not to this plugin: it is what the portal graph culls with, written by the engine
+well downstream of the record the hook touched. Reading it there can disagree with
+the hook rather than echo it, which is the whole point.
 
 Each `BSLight` is traced back to its form through the scene graph: up the parents
 of the `NiLight` to the node whose `GetUserData()` gives the `TESObjectREFR`,
@@ -130,8 +176,12 @@ missing keys come back with their comments.
 
 | Key | Default | Effect |
 |---|---|---|
-| `Filters/ExcludeMagicLights` | `false` | Skips lights whose EditorID contains `magic` |
-| `Filters/ExcludeSpotLights` | `false` | Skips lights with `Spot Light` or `Spot Shadow` |
+| `Filters/ExcludeMagicLights` | `true` | Skips lights whose EditorID contains `magic` |
+| `Filters/ExcludeSpotLights` | `true` | Skips lights with `Spot Light` or `Spot Shadow` |
+| `Filters/ExcludeShadowLights` | `true` | Skips shadow casters; they live outside room bounds |
+| `Filters/ExcludeCarriedLights` | `true` | Skips lights the player or an NPC can pick up (torches) |
+| `Filters/PatchExteriors` | `true` | Set to `false` to skip lights placed in exterior cells |
+| `LightPlacer/PatchLightPlacer` | `true` | Flags the records named by Light Placer configs at load |
 | `Log/EnableLogging` | `true` | Writes `PortalLightsRuntimePatcher.log` |
 | `Log/LogLevel` | `3` | 1=error 2=warn 3=info 4=debug 5=trace |
 | `Debug/AuditHotkey` | `0` (off) | Scan code that audits the live scene |
@@ -177,7 +227,8 @@ included so CrashLoggerSSE can resolve this plugin's frames.
 | File | Role |
 |---|---|
 | `src/main.cpp` | SKSE entry point, hook install, message listener |
-| `src/hooks.*` | the two vtable hooks, the filters, the set/restore thunk |
+| `src/hooks.*` | the two vtable hooks, the filters, the flag write |
+| `src/lightplacer.*` | the Light Placer config scan at load |
 | `src/config.*` | INI load/regenerate, global settings |
 | `src/logger.*` | spdlog setup driven by the INI |
 | `src/verify.*` | the scene audit and its hotkey |
@@ -186,9 +237,20 @@ included so CrashLoggerSSE can resolve this plugin's frames.
 
 The central idea comes from **Truman**: only reference lights should be made
 portal-strict, and patching every `LIGH` base form the way an xEdit override does
-hits spell and equipped lights it has no business touching. That is what this
-plugin is built around.
+hits spell and equipped lights it has no business touching.
 
-His implementation route — hooking two hand-found call sites of `GenDynamic` —
-did not survive contact with AE 1.6.1170, where neither offset pointed at a call
-to `GenDynamic` at all. The vtable entry points replace it and need no offsets.
+He also traced the crash that shaped the current design. In Ghidra, the faulting
+code at `0x1414A170F` on AE reaches `FUN_141509a00`, which unlinks a light from
+its owning room/portal list -- on a node that has already been freed. His reading:
+set Portal-strict only on lights that actually belong to a portal, or the cleanup
+walks a list that was never there. That is where `PatchExteriors` comes from.
+
+**nicola89b**, co-author of ELFX Shadows, reported that lighting overhauls place
+long-range shadow lights outside the room bounds on purpose, and that confining
+them breaks window shadows. That is where `ExcludeShadowLights` comes from.
+
+**Quantumyilmaz** questioned whether restoring the flag after the original call
+was safe. It was not.
+
+Thanks also to the SKSE team, Ryan McKenzie for CommonLibSSE, CharmedBaryon for
+CommonLibSSE-NG, and powerofthree for po3_Tweaks and ClibUtil.
